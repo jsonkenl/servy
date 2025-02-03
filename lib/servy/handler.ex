@@ -1,7 +1,13 @@
 defmodule Servy.Handler do
+  alias Servy.Conv
+  alias Servy.BearController
+
   @pages_path Path.expand("../../pages", __DIR__)
+
   import Servy.Plugins, only: [rewrite_path: 1, log: 1, track: 1]
   import Servy.Parser
+  import Servy.FileHandler
+
   require Logger
 
   def handle(request) do
@@ -11,35 +17,38 @@ defmodule Servy.Handler do
     |> log
     |> route
     |> track
-    # |> emojify
-    |> format
+    |> format_response
   end
 
-  def route(%{method: "GET", path: "/wildthings"} = conv) do
+  def route(%Conv{method: "GET", path: "/wildthings"} = conv) do
     %{conv | status: 200, resp_body: "Bears, Lions, Tigers"}
   end
 
-  def route(%{method: "GET", path: "/bears"} = conv) do
-    %{conv | status: 200, resp_body: "Teddy, Smokey, Paddington"}
+  def route(%Conv{method: "GET", path: "/bears"} = conv) do
+    BearController.index(conv)
   end
 
-  def route(%{method: "GET", path: "/bears/new"} = conv) do
+  def route(%Conv{method: "GET", path: "/bears/new"} = conv) do
     @pages_path
     |> Path.join("form.html")
     |> File.read()
     |> handle_file(conv)
   end
 
-  def route(%{method: "GET", path: "/bears/" <> id} = conv) do
-    %{conv | status: 200, resp_body: "Bear #{id}"}
+  def route(%Conv{method: "GET", path: "/bears/" <> id} = conv) do
+    params = Map.put(conv.params, "id", id)
+    BearController.show(conv, params)
   end
 
-  def route(%{method: "DELETE", path: "/bears/" <> _id} = conv) do
-    Logger.error("Danger Will Robinson!")
-    %{conv | status: 403, resp_body: "Deleting a bear is forbidden!"}
+  def route(%Conv{method: "POST", path: "/bears"} = conv) do
+    BearController.create(conv, conv.params)
   end
 
-  def route(%{method: "GET", path: "/about"} = conv) do
+  def route(%Conv{method: "DELETE", path: "/bears/" <> _id} = conv) do
+    BearController.delete(conv, conv.params)
+  end
+
+  def route(%Conv{method: "GET", path: "/about"} = conv) do
     file =
       @pages_path
       |> Path.join("about.html")
@@ -56,58 +65,26 @@ defmodule Servy.Handler do
     end
   end
 
-  def route(%{method: "GET", path: "/pages/" <> page} = conv) do
+  def route(%Conv{method: "GET", path: "/pages/" <> page} = conv) do
     @pages_path
     |> Path.join(page <> ".html")
     |> File.read()
     |> handle_file(conv)
   end
 
-  def route(%{path: path} = conv) do
+  def route(%Conv{path: path} = conv) do
     %{conv | status: 404, resp_body: "#{path} Not Found"}
   end
 
-  def handle_file({:ok, content}, conv) do
-    %{conv | status: 200, resp_body: content}
-  end
-
-  def handle_file({:error, :enoent}, conv) do
-    %{conv | status: 404, resp_body: "File Not Found!"}
-  end
-
-  def handle_file({:error, reason}, conv) do
-    %{conv | status: 500, resp_body: "File Error: #{reason}"}
-  end
-
-  def format(conv) do
+  def format_response(%Conv{} = conv) do
     """
-    HTTP/1.1 #{conv.status} #{status_reason(conv.status)}
+    HTTP/1.1 #{Conv.full_status(conv)}
     Content-Type: text/html
     Content-Length: #{byte_size(conv.resp_body)}
 
     #{conv.resp_body}
     """
   end
-
-  defp status_reason(code) do
-    %{
-      200 => "OK",
-      201 => "Created",
-      401 => "Unauthorized",
-      403 => "Forbidden",
-      404 => "Not Found",
-      500 => "Internal Server Error"
-    }[code]
-  end
-
-  # def emojify(%{status: 200} = conv) do
-  #   emojies = String.duplicate("🎉", 5)
-  #   body = emojies <> "\n" <> conv.resp_body <> "\n" <> emojies
-
-  #   %{conv | resp_body: body}
-  # end
-
-  # def emojify(conv), do: conv
 end
 
 # request = """
@@ -122,17 +99,17 @@ end
 
 # IO.puts(response)
 
-# request = """
-# GET /bears HTTP/1.1
-# Host: example.com
-# User-Agent: ExampleBrowser/1.0
-# Accept: */*
+request = """
+GET /bears HTTP/1.1
+Host: example.com
+User-Agent: ExampleBrowser/1.0
+Accept: */*
 
-# """
+"""
 
-# response = Servy.Handler.handle(request)
+response = Servy.Handler.handle(request)
 
-# IO.puts(response)
+IO.puts(response)
 
 # request = """
 # GET /bigfoot HTTP/1.1
@@ -146,17 +123,17 @@ end
 
 # IO.puts(response)
 
-# request = """
-# GET /bears/1 HTTP/1.1
-# Host: example.com
-# User-Agent: ExampleBrowser/1.0
-# Accept: */*
+request = """
+GET /bears/1 HTTP/1.1
+Host: example.com
+User-Agent: ExampleBrowser/1.0
+Accept: */*
 
-# """
+"""
 
-# response = Servy.Handler.handle(request)
+response = Servy.Handler.handle(request)
 
-# IO.puts(response)
+IO.puts(response)
 
 # request = """
 # GET /wildlife HTTP/1.1
@@ -194,17 +171,17 @@ end
 
 # IO.puts(response)
 
-request = """
-GET /lions?id=7 HTTP/1.1
-Host: example.com
-User-Agent: ExampleBrowser/1.0
-Accept: */*
+# request = """
+# GET /lions?id=7 HTTP/1.1
+# Host: example.com
+# User-Agent: ExampleBrowser/1.0
+# Accept: */*
 
-"""
+# """
 
-response = Servy.Handler.handle(request)
+# response = Servy.Handler.handle(request)
 
-IO.puts(response)
+# IO.puts(response)
 
 # request = """
 # GET /about HTTP/1.1
@@ -224,6 +201,21 @@ Host: example.com
 User-Agent: ExampleBrowser/1.0
 Accept: */*
 
+"""
+
+response = Servy.Handler.handle(request)
+
+IO.puts(response)
+
+request = """
+POST /bears HTTP/1.1
+Host: example.com
+User-Agent: ExampleBrowser/1.0
+Accept: */*
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 21
+
+name=Baloo&type=Brown
 """
 
 response = Servy.Handler.handle(request)
